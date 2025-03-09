@@ -1,139 +1,71 @@
 package main
 
 import (
-	"fmt"
-	"image/color"
 	"math/rand"
-	"strconv"
 	"time"
 
 	"fyne.io/fyne/v2"
 	"fyne.io/fyne/v2/app"
 	"fyne.io/fyne/v2/canvas"
 	"fyne.io/fyne/v2/container"
-	"fyne.io/fyne/v2/widget"
 )
 
-type Game struct {
-	Car           *canvas.Rectangle
-	Obstacle      *canvas.Rectangle
-	ScoreLabel    *widget.Label
-	GameOverLabel *widget.Label
-	RestartButton *widget.Button
-	Score         int
-	Running       bool
-}
+const (
+	windowWidth  = 400
+	windowHeight = 600
+	carSpeed     = 6
+	enemySpeed   = 5
+	updateDelay  = 15 * time.Millisecond // Ускорение темпа игры
+)
 
 func main() {
-	a := app.New()
-	w := a.NewWindow("F1 Turbo Rush")
-	w.Resize(fyne.NewSize(400, 600))
+	myApp := app.New()
+	myWindow := myApp.NewWindow("F1 Turbo Rush")
+	myWindow.Resize(fyne.NewSize(windowWidth, windowHeight))
 
-	game := &Game{
-		Car:        canvas.NewRectangle(color.RGBA{0, 255, 0, 255}),
-		Obstacle:   canvas.NewRectangle(color.RGBA{255, 0, 0, 255}),
-		ScoreLabel: widget.NewLabel("Score: 0"),
-		Running:    true,
+	background := canvas.NewImageFromFile("assets/track.png") // Фон трассы F1
+	background.Resize(fyne.NewSize(windowWidth, windowHeight))
+
+	playerCar := canvas.NewImageFromFile("assets/player_car.png")
+	playerCar.Move(fyne.NewPos(170, 500))
+
+	enemyCars := []*canvas.Image{}
+	for i := 0; i < 3; i++ {
+		enemyCar := canvas.NewImageFromFile("assets/enemy_car.png")
+		enemyCar.Move(fyne.NewPos(float32(rand.Intn(350)), float32(rand.Intn(300))))
+		enemyCars = append(enemyCars, enemyCar)
 	}
 
-	game.Car.Resize(fyne.NewSize(50, 100))
-	game.Car.Move(fyne.NewPos(175, 450))
+	obstacles := []*canvas.Image{}
+	for i := 0; i < 2; i++ {
+		obstacle := canvas.NewImageFromFile("assets/obstacle.png") // Разные препятствия
+		obstacle.Move(fyne.NewPos(float32(rand.Intn(350)), float32(rand.Intn(300))))
+		obstacles = append(obstacles, obstacle)
+	}
 
-	game.Obstacle.Resize(fyne.NewSize(50, 100))
-	game.Obstacle.Move(fyne.NewPos(float32(rand.Intn(350)), -100))
+	content := container.NewWithoutLayout(background, playerCar)
+	for _, car := range enemyCars {
+		content.Add(car)
+	}
+	for _, obstacle := range obstacles {
+		content.Add(obstacle)
+	}
 
-	game.GameOverLabel = widget.NewLabel("Game Over! Your Score: 0")
-	game.GameOverLabel.Hide()
+	myWindow.SetContent(content)
 
-	game.RestartButton = widget.NewButton("Restart", func() {
-		game.Restart()
-	})
-	game.RestartButton.Hide()
-
-	content := container.NewWithoutLayout(
-		game.Car,
-		game.Obstacle,
-	)
-	w.SetContent(container.NewVBox(
-		game.ScoreLabel,
-		content,
-		game.GameOverLabel,
-		game.RestartButton,
-	))
-
-	go game.StartGameLoop()
-	w.Canvas().SetOnTypedKey(func(k *fyne.KeyEvent) {
-		game.HandleInput(k)
-	})
-
-	w.ShowAndRun()
-}
-
-func (g *Game) StartGameLoop() {
-	ticker := time.NewTicker(50 * time.Millisecond)
-	defer ticker.Stop()
-
-	for range ticker.C {
-		if !g.Running {
-			return
+	go func() {
+		for {
+			time.Sleep(updateDelay)
+			for _, car := range enemyCars {
+				pos := car.Position()
+				car.Move(fyne.NewPos(pos.X, pos.Y+enemySpeed))
+				if pos.Y > windowHeight {
+					car.Move(fyne.NewPos(float32(rand.Intn(350)), 0))
+				}
+			}
+			content.Refresh()
 		}
-		g.Update()
-	}
-}
+	}()
 
-func (g *Game) Update() {
-	pos := g.Obstacle.Position()
-	pos.Y += 10
-	if pos.Y > 600 {
-		pos.Y = -100
-		pos.X = float32(rand.Intn(350))
-		g.Score++
-		g.ScoreLabel.SetText("Score: " + strconv.Itoa(g.Score))
-	}
-	g.Obstacle.Move(pos)
-	canvas.Refresh(g.Obstacle)
-
-	if g.CheckCollision() {
-		g.GameOver()
-	}
-}
-
-func (g *Game) HandleInput(k *fyne.KeyEvent) {
-	pos := g.Car.Position()
-	if k.Name == fyne.KeyLeft && pos.X > 0 {
-		pos.X -= 20
-	} else if k.Name == fyne.KeyRight && pos.X < 350 {
-		pos.X += 20
-	}
-	g.Car.Move(pos)
-	canvas.Refresh(g.Car)
-}
-
-func (g *Game) CheckCollision() bool {
-	carPos := g.Car.Position()
-	obstaclePos := g.Obstacle.Position()
-
-	if carPos.X < obstaclePos.X+50 && carPos.X+50 > obstaclePos.X &&
-		carPos.Y < obstaclePos.Y+100 && carPos.Y+100 > obstaclePos.Y {
-		return true
-	}
-	return false
-}
-
-func (g *Game) GameOver() {
-	g.Running = false
-	g.GameOverLabel.SetText(fmt.Sprintf("Game Over! Your Score: %d", g.Score))
-	g.GameOverLabel.Show()
-	g.RestartButton.Show()
-}
-
-func (g *Game) Restart() {
-	g.Score = 0
-	g.ScoreLabel.SetText("Score: 0")
-	g.Car.Move(fyne.NewPos(175, 450))
-	g.Obstacle.Move(fyne.NewPos(float32(rand.Intn(350)), -100))
-	g.GameOverLabel.Hide()
-	g.RestartButton.Hide()
-	g.Running = true
-	go g.StartGameLoop()
+	myWindow.ShowAndRun()
 }
