@@ -17,10 +17,11 @@ import (
 const (
 	windowWidth  = 400
 	windowHeight = 600
-	carSpeed     = 20 // Скорость машины игрока
-	enemySpeed   = 6  // Скорость врагов
-	updateDelay  = 16 * time.Millisecond // 60 FPS
+	carSpeed     = 4
+	enemySpeed   = 3
+	updateDelay  = 16 * time.Millisecond
 	recordFile   = "record.txt"
+	minDistance  = 60 // Минимальное расстояние между объектами
 )
 
 var score int
@@ -31,8 +32,9 @@ var obstacles []*canvas.Image
 var scoreLabel *widget.Label
 var recordLabel *widget.Label
 var gameContent *fyne.Container
-var playerX float32 = 175 // Начальная позиция игрока
-var playerY float32 = 500 // Начальная вертикальная позиция игрока
+var playerX float32 = 175
+var playerY float32 = 500
+var keysPressed = make(map[fyne.KeyName]bool)
 
 func loadRecord() {
 	if data, err := os.ReadFile(recordFile); err == nil {
@@ -53,6 +55,7 @@ func setupGame(window fyne.Window) {
 	score = 0
 	playerX = 175
 	playerY = 500
+	keysPressed = make(map[fyne.KeyName]bool)
 
 	background := canvas.NewImageFromFile("assets/track.png")
 	background.Resize(fyne.NewSize(windowWidth, windowHeight))
@@ -61,21 +64,8 @@ func setupGame(window fyne.Window) {
 	playerCar.Resize(fyne.NewSize(50, 100))
 	playerCar.Move(fyne.NewPos(playerX, playerY))
 
-	enemyCars = []*canvas.Image{}
-	for i := 0; i < 2; i++ {
-		enemyCar := canvas.NewImageFromFile("assets/enemy_car" + strconv.Itoa(i+1) + ".png")
-		enemyCar.Resize(fyne.NewSize(50, 100))
-		enemyCar.Move(fyne.NewPos(float32(rand.Intn(350)), float32(rand.Intn(300))))
-		enemyCars = append(enemyCars, enemyCar)
-	}
-
-	obstacles = []*canvas.Image{}
-	for i := 0; i < 3; i++ {
-		obstacle := canvas.NewImageFromFile("assets/obstacle" + strconv.Itoa(i+1) + ".png")
-		obstacle.Resize(fyne.NewSize(50, 50))
-		obstacle.Move(fyne.NewPos(float32(rand.Intn(350)), float32(rand.Intn(300))))
-		obstacles = append(obstacles, obstacle)
-	}
+	enemyCars = spawnUniqueObjects(2, "assets/enemy_car", 50, 100)
+	obstacles = spawnUniqueObjects(3, "assets/obstacle", 50, 50)
 
 	scoreLabel = widget.NewLabelWithStyle("Score: 0", fyne.TextAlignLeading, fyne.TextStyle{Bold: true})
 	scoreLabel.Move(fyne.NewPos(10, 10))
@@ -95,31 +85,71 @@ func setupGame(window fyne.Window) {
 	go gameLoop(window)
 }
 
+func spawnUniqueObjects(count int, assetPrefix string, width, height float32) []*canvas.Image {
+	var objects []*canvas.Image
+	for i := 0; i < count; i++ {
+		var obj *canvas.Image
+		for {
+			x := float32(rand.Intn(350))
+			y := float32(rand.Intn(300))
+
+			// Проверяем, не пересекается ли объект с уже созданными
+			if !checkOverlap(x, y, width, height, objects) {
+				obj = canvas.NewImageFromFile(assetPrefix + strconv.Itoa(i+1) + ".png")
+				obj.Resize(fyne.NewSize(width, height))
+				obj.Move(fyne.NewPos(x, y))
+				objects = append(objects, obj)
+				break
+			}
+		}
+	}
+	return objects
+}
+
+func checkOverlap(x, y, width, height float32, objects []*canvas.Image) bool {
+	for _, obj := range objects {
+		pos := obj.Position()
+		if x < pos.X+width+minDistance && x+width > pos.X-minDistance &&
+			y < pos.Y+height+minDistance && y+height > pos.Y-minDistance {
+			return true
+		}
+	}
+	return false
+}
+
 func addKeyboardControl(window fyne.Window) {
 	if deskCanvas, ok := window.Canvas().(desktop.Canvas); ok {
 		deskCanvas.SetOnKeyDown(func(e *fyne.KeyEvent) {
-			switch e.Name {
-			case fyne.KeyLeft, fyne.KeyA:
-				if playerX > 10 {
-					playerX -= carSpeed
-				}
-			case fyne.KeyRight, fyne.KeyD:
-				if playerX < windowWidth-60 {
-					playerX += carSpeed
-				}
-			case fyne.KeyUp, fyne.KeyW:
-				if playerY > 300 {
-					playerY -= carSpeed
-				}
-			case fyne.KeyDown, fyne.KeyS:
-				if playerY < windowHeight-120 {
-					playerY += carSpeed
-				}
-			}
-			playerCar.Move(fyne.NewPos(playerX, playerY))
-			gameContent.Refresh()
+			keysPressed[e.Name] = true
+		})
+		deskCanvas.SetOnKeyUp(func(e *fyne.KeyEvent) {
+			keysPressed[e.Name] = false
 		})
 	}
+}
+
+func updatePlayerPosition() {
+	if keysPressed[fyne.KeyLeft] || keysPressed[fyne.KeyA] {
+		if playerX > 10 {
+			playerX -= carSpeed
+		}
+	}
+	if keysPressed[fyne.KeyRight] || keysPressed[fyne.KeyD] {
+		if playerX < windowWidth-60 {
+			playerX += carSpeed
+		}
+	}
+	if keysPressed[fyne.KeyUp] || keysPressed[fyne.KeyW] {
+		if playerY > 10 {
+			playerY -= carSpeed
+		}
+	}
+	if keysPressed[fyne.KeyDown] || keysPressed[fyne.KeyS] {
+		if playerY < windowHeight-110 {
+			playerY += carSpeed
+		}
+	}
+	playerCar.Move(fyne.NewPos(playerX, playerY))
 }
 
 func gameLoop(window fyne.Window) {
@@ -127,10 +157,11 @@ func gameLoop(window fyne.Window) {
 	defer ticker.Stop()
 
 	for range ticker.C {
+		updatePlayerPosition()
+
 		score++
 		scoreLabel.SetText("Score: " + strconv.Itoa(score))
 
-		// Двигаем врагов
 		for _, car := range enemyCars {
 			pos := car.Position()
 			car.Move(fyne.NewPos(pos.X, pos.Y+enemySpeed))
@@ -143,7 +174,6 @@ func gameLoop(window fyne.Window) {
 			}
 		}
 
-		// Двигаем препятствия
 		for _, obstacle := range obstacles {
 			pos := obstacle.Position()
 			obstacle.Move(fyne.NewPos(pos.X, pos.Y+enemySpeed))
